@@ -6,7 +6,8 @@ const AuthContext = createContext(null);
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    // Safe fallback to avoid hard crash; better to ensure provider order
+    return { user: null, isAuthenticated: false, loading: false, login: async () => ({ success: false }) };
   }
   return context;
 };
@@ -31,7 +32,6 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     try {
       const response = await authAPI.login({ email, password });
-      
       if (response.data.success) {
         localStorage.setItem('token', response.data.token);
         localStorage.setItem('user', JSON.stringify(response.data.user));
@@ -39,7 +39,6 @@ export const AuthProvider = ({ children }) => {
         setIsAuthenticated(true);
         return { success: true, user: response.data.user };
       }
-      
       return { success: false, message: 'Login failed' };
     } catch (error) {
       const message = error.response?.data?.message || 'Login failed';
@@ -50,7 +49,6 @@ export const AuthProvider = ({ children }) => {
   const register = async (username, email, password) => {
     try {
       const response = await authAPI.register({ username, email, password });
-      
       if (response.data.success) {
         localStorage.setItem('token', response.data.token);
         localStorage.setItem('user', JSON.stringify(response.data.user));
@@ -58,7 +56,6 @@ export const AuthProvider = ({ children }) => {
         setIsAuthenticated(true);
         return { success: true, user: response.data.user };
       }
-      
       return { success: false, message: 'Registration failed' };
     } catch (error) {
       const message = error.response?.data?.message || 'Registration failed';
@@ -82,12 +79,10 @@ export const AuthProvider = ({ children }) => {
   const updateSettings = async (settings) => {
     try {
       const response = await authAPI.updateSettings(settings);
-      
       if (response.data.success) {
         updateUser(response.data.user);
         return { success: true };
       }
-      
       return { success: false, message: 'Failed to update settings' };
     } catch (error) {
       const message = error.response?.data?.message || 'Failed to update settings';

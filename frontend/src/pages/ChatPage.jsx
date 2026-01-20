@@ -17,11 +17,22 @@ const ChatPage = () => {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isTyping, setIsTyping] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    if (typeof window !== 'undefined') return window.innerWidth > 768;
+    return true;
+  });
+
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [currentChatId, setCurrentChatId] = useState(chatId);
 
   const messagesEndRef = useRef(null);
+
+  useEffect(() => {
+    const onResize = () => setSidebarOpen(window.innerWidth > 768);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   useEffect(() => {
     if (chatId) {
@@ -32,15 +43,12 @@ const ChatPage = () => {
       setMessages([]);
       setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatId]);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, isTyping]);
-
-  const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  }, [messages, isTyping]);
 
   const fetchChat = async (id) => {
     try {
@@ -55,7 +63,6 @@ const ChatPage = () => {
       const status = error.response?.status;
       if (status === 429) {
         console.warn('Rate/quota limit hit while fetching chat.');
-        // Optional: surface a non-blocking banner/toast here
       } else {
         console.error('Failed to fetch chat:', error);
         navigate('/');
@@ -65,7 +72,6 @@ const ChatPage = () => {
     }
   };
 
-  // Ensure a chat exists before sending any message
   const handleSendMessage = async (messageData) => {
     if (!currentChatId) {
       try {
@@ -79,6 +85,7 @@ const ChatPage = () => {
           setCurrentChatId(newChat._id);
           navigate(`/chat/${newChat._id}`);
           await sendMessage(newChat._id, messageData);
+          window.dispatchEvent(new Event('chats:refresh'));
         }
       } catch (e) {
         console.error('Failed to create chat:', e);
@@ -103,7 +110,7 @@ const ChatPage = () => {
         fileAttachments: messageData.fileAttachments || []
       };
 
-      setMessages(prev => [...prev, userMessage]);
+      setMessages((prev) => [...prev, userMessage]);
       setIsTyping(true);
 
       const response = await fetch(`${import.meta.env.VITE_API_URL}/api/chat/${id}/message`, {
@@ -116,7 +123,6 @@ const ChatPage = () => {
       });
 
       if (!response.ok) {
-        // If server rejected before starting SSE
         throw new Error('Failed to send message');
       }
 
@@ -128,8 +134,7 @@ const ChatPage = () => {
         timestamp: new Date()
       };
 
-      // Push placeholder for streaming assistant
-      setMessages(prev => [...prev, assistantMessage]);
+      setMessages((prev) => [...prev, assistantMessage]);
 
       while (true) {
         const { done, value } = await reader.read();
@@ -139,56 +144,42 @@ const ChatPage = () => {
         const lines = chunk.split('\n');
 
         for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            if (data === '[DONE]') {
-              setIsTyping(false);
-              return;
+          if (!line.startsWith('data: ')) continue;
+
+          const data = line.slice(6);
+          if (data === '[DONE]') {
+            setIsTyping(false);
+            window.dispatchEvent(new Event('chats:refresh'));
+            return;
+          }
+
+          try {
+            const parsed = JSON.parse(data);
+
+            if (parsed.content) {
+              assistantMessage.content += parsed.content;
+              setMessages((prev) => {
+                const updated = [...prev];
+                updated[updated.length - 1] = {
+                  ...updated[updated.length - 1],
+                  content: assistantMessage.content
+                };
+                return updated;
+              });
             }
 
-            try {
-              const parsed = JSON.parse(data);
+            if (parsed.error) {
+              setIsTyping(false);
+              setMessages((prev) => prev.slice(0, -1));
 
-              if (parsed.content) {
-                assistantMessage.content += parsed.content;
-                setMessages(prev => {
-                  const updated = [...prev];
-                  // Update the last message (placeholder assistant) content
-                  updated[updated.length - 1] = {
-                    ...updated[updated.length - 1],
-                    content: assistantMessage.content
-                  };
-                  return updated;
-                });
-              }
-
-              if (parsed.error) {
-                // Streaming reported an error (e.g., insufficient_quota)
-                setIsTyping(false);
-                // Remove placeholder assistant message
-                setMessages(prev => prev.slice(0, -1));
-
-                // Try server-side fallback so history remains in sync
-                const idToUse = currentChatId || chatId;
-                if (idToUse) {
-                  try {
-                    await chatAPI.sendMessageFallback(idToUse, messageData);
-                    await fetchChat(idToUse); // Sync full history from server
-                  } catch (fallbackErr) {
-                    console.warn('Fallback failed, showing inline message only:', fallbackErr);
-                    // Inline assistant error message as a last resort
-                    setMessages(prev => [
-                      ...prev,
-                      {
-                        role: 'assistant',
-                        content: `⚠️ ${parsed.error}`,
-                        timestamp: new Date()
-                      }
-                    ]);
-                  }
-                } else {
-                  // If somehow we still don't have id, just surface inline
-                  setMessages(prev => [
+              const idToUse = currentChatId || chatId;
+              if (idToUse) {
+                try {
+                  await chatAPI.sendMessageFallback(idToUse, messageData);
+                  await fetchChat(idToUse);
+                } catch (fallbackErr) {
+                  console.warn('Fallback failed:', fallbackErr);
+                  setMessages((prev) => [
                     ...prev,
                     {
                       role: 'assistant',
@@ -197,11 +188,20 @@ const ChatPage = () => {
                     }
                   ]);
                 }
-                return;
+              } else {
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    role: 'assistant',
+                    content: `⚠️ ${parsed.error}`,
+                    timestamp: new Date()
+                  }
+                ]);
               }
-            } catch (e) {
-              // Skip invalid JSON lines
+              return;
             }
+          } catch {
+            // ignore invalid JSON lines
           }
         }
       }
@@ -210,8 +210,7 @@ const ChatPage = () => {
     } catch (error) {
       console.error('Failed to send message:', error);
       setIsTyping(false);
-      // Show inline message instead of alert to avoid UX disruption
-      setMessages(prev => [
+      setMessages((prev) => [
         ...prev,
         {
           role: 'assistant',
@@ -231,6 +230,26 @@ const ChatPage = () => {
     }
   };
 
+  const toggleSidebar = () => {
+    if (window.innerWidth <= 768) {
+      setSidebarOpen((prev) => !prev);
+    } else {
+      setSidebarOpen(true);
+    }
+  };
+
+  const handleSelectChat = (id) => {
+    if (!id) {
+      navigate('/');
+      return;
+    }
+    setCurrentChatId(id);
+    navigate(`/chat/${id}`);
+    if (window.innerWidth <= 768) {
+      setSidebarOpen(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="page-loading">
@@ -242,19 +261,22 @@ const ChatPage = () => {
 
   return (
     <div className="chat-page">
-      <ChatSidebar
-        activeChatId={currentChatId}
-        onSelectChat={(id) => {
-          setCurrentChatId(id);
-          navigate(`/chat/${id}`);
-        }}
+      <aside className={`sidebar-container ${sidebarOpen ? 'open' : 'closed'}`}>
+        <ChatSidebar activeChatId={currentChatId} onSelectChat={handleSelectChat} />
+      </aside>
+
+      <div
+        className={`sidebar-backdrop ${sidebarOpen ? 'show' : ''}`}
+        onClick={() => setSidebarOpen(false)}
       />
 
-      <div className="chat-main">
+      <main className="chat-main">
         <div className="chat-header">
           <button
             className="sidebar-toggle"
-            onClick={() => setSidebarOpen(!sidebarOpen)}
+            onClick={toggleSidebar}
+            aria-label="Toggle sidebar"
+            title="Toggle sidebar"
           >
             ☰
           </button>
@@ -265,11 +287,7 @@ const ChatPage = () => {
           </div>
 
           <div className="chat-actions">
-            <button
-              className="icon-btn"
-              onClick={() => setSettingsOpen(true)}
-              title="Chat Settings"
-            >
+            <button className="icon-btn" onClick={() => setSettingsOpen(true)} title="Chat Settings">
               <Settings size={20} />
             </button>
           </div>
@@ -329,18 +347,10 @@ const ChatPage = () => {
           <div ref={messagesEndRef} />
         </div>
 
-        <ChatInput
-          onSendMessage={handleSendMessage}
-          disabled={isTyping}
-          isLoading={isTyping}
-        />
-      </div>
+        <ChatInput onSendMessage={handleSendMessage} disabled={isTyping} isLoading={isTyping} />
+      </main>
 
-      {/* Properly mounted Settings Panel */}
-      <SettingsPanel
-        isOpen={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-      />
+      <SettingsPanel isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 };
