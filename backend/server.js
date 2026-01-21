@@ -54,11 +54,7 @@ const allowedOrigins = [
 console.log('✓ Allowed Origins:', allowedOrigins);
 
 const corsOptions = {
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error(`CORS blocked for origin: ${origin}`));
-  },
+  origin: true, // reflect the request Origin header
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
@@ -98,6 +94,7 @@ app.use(
    CORS (must be early, before routes)
    =========================== */
 app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
 // NOTE: app.use(cors()) handles preflight for all routes automatically
 // NO NEED for app.options('*', cors()) - this causes the PathError
 
