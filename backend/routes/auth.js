@@ -18,10 +18,7 @@ const generateToken = (id) => {
 router.post(
   '/register',
   [
-    body('username')
-      .trim()
-      .isLength({ min: 3, max: 50 })
-      .withMessage('Username must be between 3 and 50 characters'),
+    body('username').trim().isLength({ min: 3, max: 50 }).withMessage('Username must be between 3 and 50 characters'),
     body('email').isEmail().withMessage('Please provide a valid email'),
     body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters long'),
   ],
@@ -43,7 +40,7 @@ router.post(
       }
 
       const user = await User.create({
-        username,
+        username,             // change to 'name' if your schema uses that field
         email,
         password,
         preferredLanguage: preferredLanguage || 'en',
@@ -66,13 +63,25 @@ router.post(
       });
     } catch (error) {
       console.error('Registration Error:', error);
+
+      if (error.code === 11000) {
+        return res.status(400).json({ success: false, message: 'Email or username already exists' });
+      }
+      if (error.name === 'ValidationError') {
+        return res.status(400).json({
+          success: false,
+          message: Object.values(error.errors).map(e => e.message).join(', ')
+        });
+      }
+
       return res.status(500).json({
         success: false,
-        message: 'Server error during registration',
+        message: 'Server error during registration'
       });
     }
   }
 );
+
 
 // POST /api/auth/login
 router.post(
