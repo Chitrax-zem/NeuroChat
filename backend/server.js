@@ -41,9 +41,9 @@ if (!process.env.JWT_EXPIRE) {
    CORS Allowlist
    =========================== */
 const allowedOrigins = [
-  process.env.CLIENT_URL || 'http://localhost:5173',             // Frontend (Vercel or local)
-  process.env.PUBLIC_URL,                                         // Public frontend URL (Vercel)
-  process.env.BACKEND_PUBLIC_URL,                                 // Public backend URL (Render)
+  process.env.CLIENT_URL || 'http://localhost:5173',
+  process.env.PUBLIC_URL,
+  process.env.BACKEND_PUBLIC_URL,
   'http://localhost:8888',
   'http://127.0.0.1:8888',
   'http://localhost:5000',
@@ -51,12 +51,10 @@ const allowedOrigins = [
   'http://127.0.0.1:5173'
 ].filter(Boolean);
 
-// Useful log to verify at startup
 console.log('✓ Allowed Origins:', allowedOrigins);
 
 const corsOptions = {
   origin: (origin, callback) => {
-    // Allow non-browser clients (e.g., curl) or same-origin
     if (!origin) return callback(null, true);
     if (allowedOrigins.includes(origin)) return callback(null, true);
     return callback(new Error(`CORS blocked for origin: ${origin}`));
@@ -80,7 +78,6 @@ app.use(
             scriptSrc: ["'self'", "'unsafe-inline'"],
             styleSrc: ["'self'", "'unsafe-inline'"],
             imgSrc: ["'self'", 'data:', 'https:', 'http:'],
-            // Allow connections to your frontend and backend public URLs
             connectSrc: [
               "'self'",
               'http://localhost:*',
@@ -101,8 +98,8 @@ app.use(
    CORS (must be early, before routes)
    =========================== */
 app.use(cors(corsOptions));
-// Handle preflight for all routes so browser receives CORS headers
-app.options('*', cors(corsOptions));
+// NOTE: app.use(cors()) handles preflight for all routes automatically
+// NO NEED for app.options('*', cors()) - this causes the PathError
 
 /* ===========================
    JSON & URL-encoded Body Parsers
@@ -142,7 +139,6 @@ const io = socketIo(server, {
 });
 
 app.use((req, res, next) => {
-  // Helpful headers for caches and debugging
   res.setHeader('Vary', 'Origin');
   req.io = io;
   next();
